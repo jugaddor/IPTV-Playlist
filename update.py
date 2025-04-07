@@ -1,44 +1,55 @@
 import requests
 from collections import defaultdict
 
+# Источники плейлистов
 SOURCES = [
     "https://iptv-org.github.io/iptv/countries/ru.m3u",
     "https://raw.githubusercontent.com/freearhey/iptv/master/channels/ru.m3u"
 ]
 
-# Словарь для категорий (можно редактировать)
+# Категории каналов
 CATEGORIES = {
-    "новости": ["news", "rt", "bbc", "cnn"],
-    "спорт": ["sport", "матч", "футбол"],
-    "кино": ["кино", "film", "premiere"],
-    "детские": ["cartoon", "мульт", "карусель"]
+    "Новости": ["news", "новости", "rt", "bbc", "cnn"],
+    "Спорт": ["спорт", "sport", "матч", "футбол"],
+    "Кино": ["кино", "film", "premiere", "hbo"],
+    "Детские": ["cartoon", "мульт", "карусель"]
 }
 
-def categorize_channel(name):
-    name = name.lower()
+def get_category(channel_name):
+    channel_lower = channel_name.lower()
     for cat, keywords in CATEGORIES.items():
-        if any(kw in name for kw in keywords):
+        if any(kw in channel_lower for kw in keywords):
             return cat
-    return "другое"
+    return "Другие"
 
-def process_playlist():
-    channels = defaultdict(list)
+def main():
+    all_channels = []
     
+    # Загрузка каналов из всех источников
     for url in SOURCES:
         try:
             response = requests.get(url, timeout=10)
-            for line in response.text.splitlines():
-                if line.startswith('#EXTINF'):
-                    name = line.split(',')[-1]
-                    category = categorize_channel(name)
-                    channels[category].append(f"{line}\n{next(response.iter_lines()).decode()}")
-        except Exception as e:
-            print(f"Error: {e}")
+            if response.status_code == 200:
+                all_channels.extend(response.text.splitlines())
+        except:
+            continue
 
+    # Обработка и группировка
     with open("ru.m3u", "w", encoding="utf-8") as f:
         f.write("#EXTM3U x-tvg-url=\"http://epg.it999.ru/epg2.xml.gz\"\n")
-        for category, items in channels.items():
-            f.write(f"\n#EXTGRP:{category}\n")
-            f.write("\n".join(items))
-            
-process_playlist()
+        
+        current_group = None
+        for i in range(len(all_channels)):
+            line = all_channels[i]
+            if line.startswith("#EXTINF"):
+                channel_name = line.split(",")[-1]
+                group = get_category(channel_name)
+                
+                if group != current_group:
+                    f.write(f"\n#EXTGRP:{group}\n")
+                    current_group = group
+                
+                f.write(f"{line}\n{all_channels[i+1]}\n")
+
+if __name__ == "__main__":
+    main()
