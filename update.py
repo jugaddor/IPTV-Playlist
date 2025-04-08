@@ -1,55 +1,66 @@
-import requests
-from collections import defaultdict
+name: Update IPTV Playlist
 
-# Источники плейлистов
-SOURCES = [
-    "https://iptv-org.github.io/iptv/countries/ru.m3u",
-    "https://raw.githubusercontent.com/freearhey/iptv/master/channels/ru.m3u"
-]
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Ежедневно в 00:00 UTC
+  workflow_dispatch:      # Разрешает ручной запуск
 
-# Категории каналов
-CATEGORIES = {
-    "Новости": ["news", "новости", "rt", "bbc", "cnn"],
-    "Спорт": ["спорт", "sport", "матч", "футбол"],
-    "Кино": ["кино", "film", "premiere", "hbo"],
-    "Детские": ["cartoon", "мульт", "карусель"]
-}
+permissions:
+  contents: write        # Даем права на запись
 
-def get_category(channel_name):
-    channel_lower = channel_name.lower()
-    for cat, keywords in CATEGORIES.items():
-        if any(kw in channel_lower for kw in keywords):
-            return cat
-    return "Другие"
+jobs:
+  update:
+    runs-on: ubuntu-latest
 
-def main():
-    all_channels = []
-    
-    # Загрузка каналов из всех источников
-    for url in SOURCES:
-        try:
-            response = requests.get(url, timeout=10)
-            if response.status_code == 200:
-                all_channels.extend(response.text.splitlines())
-        except:
-            continue
+    steps:
+      # Шаг 1: Клонируем репозиторий
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-    # Обработка и группировка
-    with open("ru.m3u", "w", encoding="utf-8") as f:
-        f.write("#EXTM3U x-tvg-url=\"http://epg.it999.ru/epg2.xml.gz\"\n")
-        
-        current_group = None
-        for i in range(len(all_channels)):
-            line = all_channels[i]
-            if line.startswith("#EXTINF"):
-                channel_name = line.split(",")[-1]
-                group = get_category(channel_name)
-                
-                if group != current_group:
-                    f.write(f"\n#EXTGRP:{group}\n")
-                    current_group = group
-                
-                f.write(f"{line}\n{all_channels[i+1]}\n")
+      # Шаг 2: Создаем базовый файл если отсутствует
+      - name: Create playlist file
+        run: |
+          if [ ! -f ru.m3u ]; then
+            echo "#EXTM3U" > ru.m3u
+          fi
 
-if __name__ == "__main__":
-    main()
+      # Шаг 3: Устанавливаем Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      # Шаг 4: Запускаем скрипт обновления
+      - name: Run update script
+        run: |
+          pip install requests
+          python update.py
+
+      # Шаг 5: Фильтруем нерабочие каналы (ИСПРАВЛЕННЫЙ ШАГ)
+      - name: Filter dead channels
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y npm
+          npm install -g iptv-checker
+          if [ ! -f ru.m3u ]; then
+              echo "Error: ru.m3u not found!"
+              exit 1
+          fi
+          iptv-checker --input ru.m3u --output temp.m3u --timeout 3000 || {
+              echo "IPTV checker failed, keeping original file"
+              cp ru.m3u temp.m3u
+          }
+          mv temp.m3u ru.m3u
+
+      # Шаг 6: Пушим изменения
+      - name: Commit and push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add ru.m3u
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update: $(date +'%Y-%m-%d %H:%M')" && git push origin main)
