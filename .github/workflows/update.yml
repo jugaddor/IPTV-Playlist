@@ -3,57 +3,62 @@ name: Update IPTV Playlist
 on:
   schedule:
     - cron: '0 0 * * *'  # Ежедневно в 00:00 UTC
-  workflow_dispatch:      # Разрешает ручной запуск
+  workflow_dispatch:
 
 permissions:
-  contents: write        # Даем права на запись
+  contents: write
 
 jobs:
   update:
     runs-on: ubuntu-latest
 
     steps:
-      # Шаг 1: Клонируем репозиторий
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Шаг 2: Создаем базовый файл если отсутствует
       - name: Create playlist file
         run: |
           if [ ! -f ru.m3u ]; then
             echo "#EXTM3U" > ru.m3u
           fi
 
-      # Шаг 3: Устанавливаем Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      # Шаг 4: Запускаем скрипт обновления
       - name: Run update script
         run: |
           pip install requests
           python update.py
 
-      # Шаг 5: Фильтруем нерабочие каналы
       - name: Filter dead channels
         run: |
+          # Устанавливаем только необходимые пакеты
           sudo apt-get update
-          sudo apt-get install -y npm
-          npm install -g iptv-checker
-          iptv-checker -i ru.m3u -o temp.m3u --timeout 3000
+          sudo apt-get install -y ffmpeg
+          
+          # Альтернативный вариант проверки с ffmpeg
+          while IFS= read -r line; do
+            if [[ "$line" == http* ]]; then
+              if ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$line" >/dev/null 2>&1; then
+                echo "$line"
+              fi
+            else
+              echo "$line"
+            fi
+          done < ru.m3u > temp.m3u
           mv temp.m3u ru.m3u
 
-      # Шаг 6: Пушим изменения
       - name: Commit and push
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           git add ru.m3u
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update: $(date +'%Y-%m-%d %H:%M')" && git push origin main)
+          git diff-index --quiet HEAD || {
+            git commit -m "Auto-update: $(date +'%Y-%m-%d %H:%M')"
+            git pull --ff-only
+            git push origin main
+          }
