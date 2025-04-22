@@ -1,5 +1,3 @@
-- name: Filter dead channels
-  run: |
     # Устанавливаем необходимые пакеты
     sudo apt-get update
     sudo apt-get install -y ffmpeg
